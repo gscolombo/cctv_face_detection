@@ -4,3 +4,4 @@ matplotlib
 facenet-pytorch
 ultralytics
 tqdm
+pyarrow

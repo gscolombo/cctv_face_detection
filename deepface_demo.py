@@ -1,80 +1,125 @@
-from deepface.modules.streaming import grab_facial_areas
 from deepface.modules.detection import extract_faces
+from deepface.modules.exceptions import FaceNotDetected
 
-import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.image import AxesImage
 import cv2 as cv
-from tqdm import tqdm
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 import os
-import io
 import resource
 import psutil
+from pathlib import Path
+import sys
 
-CCTV_VIDEO_FOLDER = "./data/chokepoint/videos"
-DETECTOR_MODEL="yolov11n"
-OUTPUT_PATH="./data/results/"
+from datetime import datetime
+from pprint import pprint
+import argparse
 
-CODEC_FOURCC = cv.VideoWriter.fourcc(*'FFV1')
-VIDEO_FORMAT = ".avi"
+from typing import Union, List, Dict, Any, cast
+
+TEMP_DIR = Path(os.path.abspath(os.path.dirname(__file__)), "data", "tmp_detected_faces")
+DETECTOR_MODEL="yunet"
 
 # Avoid full memory depletion (limited to 90% of available memory)
 _, hard = resource.getrlimit(resource.RLIMIT_AS)
-resource.setrlimit(resource.RLIMIT_AS, (int(psutil.virtual_memory()[1] * 0.9), hard))
+resource.setrlimit(resource.RLIMIT_AS, (int(psutil.virtual_memory()[1] * 0.95), hard))
+
+def prepare_fs(name: str):
+    annotations_folder = Path(TEMP_DIR, name)
+    annotations_folder.mkdir(exist_ok=True, parents=True)
+    
+    return annotations_folder
     
 
-def face_recon():
-    if not os.path.exists(OUTPUT_PATH):
-        os.mkdir(OUTPUT_PATH)
+def face_recon(path: Union[str, Path], show: bool = False, debug: bool = False):
+    annot_path = prepare_fs(os.path.basename(path).split(".")[0])
     
-    files = os.listdir(CCTV_VIDEO_FOLDER)
+    vidcap = cv.VideoCapture(path)
 
-    if len(files) > 0:
-        for file in files:
-            vidcap = cv.VideoCapture(os.path.join(CCTV_VIDEO_FOLDER, file))
+    width = int(vidcap.get(cv.CAP_PROP_FRAME_WIDTH))
+    height = int(vidcap.get(cv.CAP_PROP_FRAME_WIDTH))
+    frame_count = 0
+    
+    detected_faces = []
+    
+    schema = pa.schema([
+        ("face", pa.list_(pa.float64())),
+        ("facial_area", pa.struct([
+            ("x", pa.int64()),
+            ("y", pa.int64()),
+            ("w", pa.int64()),
+            ("h", pa.int64()),
+            ("left_eye", pa.list_(pa.int64(), 2)),
+            ("right_eye", pa.list_(pa.int64(), 2))
+        ])),
+        ("confidence", pa.float64()),
+        ("ts", pa.timestamp('us'))
+    ])
+    
+    while vidcap.isOpened():
+        success, image = vidcap.read()
+        
+        if success:
+            try:
+                detected_faces = extract_faces(img_path=image,
+                                                detector_backend=DETECTOR_MODEL,
+                                                enforce_detection=True) # Detect faces in frame
 
-            fps = vidcap.get(cv.CAP_PROP_FPS)
-            height = int(vidcap.get(cv.CAP_PROP_FRAME_HEIGHT))
-            width = int(vidcap.get(cv.CAP_PROP_FRAME_WIDTH))
-            frame_count = int(vidcap.get(cv.CAP_PROP_FRAME_COUNT))
-            file_path = os.path.join(OUTPUT_PATH, os.path.basename(file).split(".")[0] + "_out" + VIDEO_FORMAT)
-            
-            output = cv.VideoWriter(filename=file_path, 
-                                    apiPreference=cv.CAP_FFMPEG,
-                                    fourcc=CODEC_FOURCC, 
-                                    fps=fps, 
-                                    frameSize=(width, height))
+                # Include bounding box for every face detected in axis, if any
+                if len(detected_faces) > 0:
+                    for i, face in enumerate(detected_faces):
+                        if face["confidence"] > 0.9:
+                            # Set dict as column-oriented data
+                            face_co = face.copy()
+                            
+                            face_co["face"] = [face_co["face"].flatten()]
+                            face_co["facial_area"] = [face_co["facial_area"]]
+                            face_co["confidence"] = [face_co["confidence"]]
+                            face_co["ts"] = [datetime.now()]
+                            
+                            uuid = f"{i}_{frame_count}"
+                            
+                            annot_table = pa.Table.from_pydict(face_co, schema)
+                            pq.write_table(annot_table, annot_path.joinpath(uuid + ".parquet"))
+                            
                     
-            
-            clahe = cv.createCLAHE(clipLimit=5, tileGridSize=(8,6))
-            
-            while vidcap.isOpened():
-                success, image = vidcap.read()
+            except FaceNotDetected as e:
+                continue
+            finally:
+                frame_count += 1
                 
-                if success:
-                    frame = cv.cvtColor(image, cv.COLOR_BGR2GRa)
+                if show:
+                    for face in detected_faces:
+                        x, y, w, h, _, _ = face["facial_area"].values()
+                        
+                        if debug:
+                            print(f"Position: ({x}, {y}) | Size: {w}x{h} | Confidence: {face["confidence"]:.0%}")
+                            
+                        cv.rectangle(image, rec=(x, y, w, h), color=(0, 255, 0), thickness=2)
                     
-                    faces = grab_facial_areas(img=image,
-                                              detector_backend=DETECTOR_MODEL,
-                                              threshold=int(width * 0.01)) # Detect faces in frame
-                    
-                    # Include bounding box for every face detected in axis, if any
-                    if len(faces) > 0:
-                        for (x, y, w, h, _, _) in faces:
-                            cv.rectangle(image, rec=(x, y, w, h), color=(0, 255, 0), thickness=2)
-                    
-                    cv.imshow('frame', image)  
+                    cv.imshow('frame', image)
+                    detected_faces = []
                     
                     if cv.waitKey(1) & 0xFF == ord('q'):
                         break
-                else:
-                    break
-                
-            output.release()
-            vidcap.release()
-            cv.destroyAllWindows()
+        else:
+            break
+        
+    vidcap.release()
+    cv.destroyAllWindows()
             
 if __name__ == "__main__":
-    face_recon()
+    arg_parser = argparse.ArgumentParser()
+    
+    arg_parser.add_argument("path")
+    arg_parser.add_argument("-s", "--show", action="store_true", default=False)
+    arg_parser.add_argument("-d", "--debug", action="store_true", default=False)
+    
+    args = arg_parser.parse_args()
+    
+    if not os.path.exists(args.path):
+        print("Path not found.")
+        exit(1)
+    
+    face_recon(**vars(args))
