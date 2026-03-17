@@ -1,0 +1,13 @@
+services:
+  camera:
+    build:
+      ./camera
+    tty: true
+    stdin_open: true
+    environment:
+      - CAMERA_TEMP_DIR=${CAMERA_TEMP_DIR}
+    volumes:
+      - ./data:/data
+    privileged: true
+    mem_limit: 8g
+  

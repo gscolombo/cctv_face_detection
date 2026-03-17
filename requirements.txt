@@ -1,7 +1,0 @@
-deepface
-tf-keras
-matplotlib
-facenet-pytorch
-ultralytics
-tqdm
-pyarrow

@@ -18,7 +18,7 @@ import argparse
 
 from typing import Union, List, Dict, Any, cast
 
-TEMP_DIR = Path(os.path.abspath(os.path.dirname(__file__)), "data", "tmp_detected_faces")
+TEMP_DIR = Path(os.environ["CAMERA_TEMP_DIR"])
 DETECTOR_MODEL="yunet"
 
 # Avoid full memory depletion (limited to 90% of available memory)
@@ -33,6 +33,7 @@ def prepare_fs(name: str):
     
 
 def face_recon(path: Union[str, Path], show: bool = False, debug: bool = False):
+  
     annot_path = prepare_fs(os.path.basename(path).split(".")[0])
     
     vidcap = cv.VideoCapture(path)
@@ -89,20 +90,22 @@ def face_recon(path: Union[str, Path], show: bool = False, debug: bool = False):
             finally:
                 frame_count += 1
                 
-                if show:
+                if show or debug:
                     for face in detected_faces:
                         x, y, w, h, _, _ = face["facial_area"].values()
                         
                         if debug:
-                            print(f"Position: ({x}, {y}) | Size: {w}x{h} | Confidence: {face["confidence"]:.0%}")
+                            print(f"Face detected in frame {frame_count}:")
+                            print(f"Position: ({x}, {y}) | Size: {w}x{h} | Confidence: {face['confidence']:.0%}\n")
+                        
+                        if show:
+                            cv.rectangle(image, rec=(x, y, w, h), color=(0, 255, 0), thickness=2)
+                            cv.imshow('frame', image)
                             
-                        cv.rectangle(image, rec=(x, y, w, h), color=(0, 255, 0), thickness=2)
-                    
-                    cv.imshow('frame', image)
+                            if cv.waitKey(1) & 0xFF == ord('q'):
+                                break
+                            
                     detected_faces = []
-                    
-                    if cv.waitKey(1) & 0xFF == ord('q'):
-                        break
         else:
             break
         

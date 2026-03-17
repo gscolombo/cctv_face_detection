@@ -1,0 +1,5 @@
+deepface==0.0.99
+facenet-pytorch==2.6.0
+ultralytics==8.4.21
+pyarrow==23.0.1
+tf-keras==2.20.1
