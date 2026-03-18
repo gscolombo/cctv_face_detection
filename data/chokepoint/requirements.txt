@@ -2,3 +2,5 @@ beautifulsoup4
 tqdm
 requests
 tqdm-multiprocess
+opencv-python
+numpy
