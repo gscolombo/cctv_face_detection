@@ -1,5 +1,7 @@
 data/**/*.tar.xz
 data/**/videos
+data/**/tmp
 db
 .venv
 .env
+__pycache__
