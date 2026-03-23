@@ -24,8 +24,7 @@ BLOCK_SIZE = 1024
 
 URL_LIST = List[List[str]]
 
-PREFIX = "P2"
-TO_DOWNLOAD = ["P2E_S2", "P2L_S2", "P2E_S1", "P2L_S1"]
+TO_DOWNLOAD = ["P1E_S1.tar.xz", "P1E.tar.xz"]
 
 
 def download_file(dirpath: Path, url: str, tqdm_func, global_tqdm):
@@ -68,10 +67,10 @@ def scrape_urls() -> URL_LIST:
         url = a.get("href")
         filename: str = url.split("/")[-1]
 
-        if filename.startswith(PREFIX):
-            if filename.split(".", maxsplit=1)[0] in TO_DOWNLOAD:
-                urls.append([ORIGINAL_FILES_DIRNAME, url])
-            elif "S" not in filename:
+        if filename in TO_DOWNLOAD:
+            if "S" not in filename:
                 urls.append([CROPPED_FACE_IMAGES_DIRNAME, url])
+            else:
+                urls.append([ORIGINAL_FILES_DIRNAME, url])
 
     return urls
