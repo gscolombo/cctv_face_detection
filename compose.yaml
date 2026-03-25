@@ -1,5 +1,6 @@
 services:
   camera:
+    container_name: camera
     build:
       ./camera
     tty: true
@@ -9,9 +10,14 @@ services:
     volumes:
       - ./data:/data
     privileged: true
-    mem_limit: 8g
+    develop:
+      watch:
+        - path: ./camera
+          action: sync
+          target: /
 
   mongo:
+    container_name: mongo
     image: mongo
     restart: always
     environment:
@@ -23,6 +29,7 @@ services:
       - 27017:27017
 
   mongo-express:
+    container_name: mongo-webserver
     image: mongo-express
     restart: always
     ports:
@@ -32,5 +39,24 @@ services:
       ME_CONFIG_BASICAUTH_ENABLED: true
       ME_CONFIG_BASICAUTH_USERNAME: admin
       ME_CONFIG_BASICAUTH_PASSWORD: password
+    depends_on:
+      - mongo
 
-  
+  processor:
+    container_name: processor
+    build: ./processor
+    environment:
+      - DATA_PATH=${CAMERA_TEMP_DIR}
+    depends_on:
+      - camera
+      - mongo
+    volumes:
+      - ./data:/opt/spark/work-dir/data
+    ports:
+      - 4040:4040
+    develop:
+      watch:
+        - path: ./processor
+          action: sync+restart
+          target: /opt/spark/work-dir
+    mem_limit: 8g
