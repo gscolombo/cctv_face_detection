@@ -4,3 +4,4 @@ requests
 tqdm-multiprocess
 opencv-python
 numpy
+pymongo
