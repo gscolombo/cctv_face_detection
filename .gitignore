@@ -1,6 +1,6 @@
 data/**/*.tar.xz
 data/**/videos
-data/**/tmp
+data/**/tmp*
 db
 .venv
 .env
