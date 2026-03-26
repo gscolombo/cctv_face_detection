@@ -1,5 +1,6 @@
-from pyspark.sql import SparkSession
+from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.types import *
+from pyspark.sql import functions as F
 from pyspark.logger import PySparkLogger
 
 import logging
@@ -39,14 +40,20 @@ if __name__ == "__main__":
         logger.info("Waiting for data...")
         sleep(1)
 
-    faces = (
+    data = (
         spark.readStream.schema(schema)
         .options(maxFilesPerTrigger=100)
         .parquet(os.environ["DATA_PATH"])
-        .writeStream.outputMode("append")
-        .format("console")
-        .start()
     )
 
+    faces = data.withColumn(
+        "face_image",
+        F.expr(
+            "transform(sequence(0, facial_area.w * facial_area.h), i -> slice(face, i*3 + 1, 3))"
+        ),
+    ).drop("face", "facial_area")
+
+    query = faces.writeStream.outputMode("append").format("console").start()
+
     logger.info("Streaming started, waiting for termination")
-    faces.awaitTermination()
+    query.awaitTermination()
