@@ -3,6 +3,11 @@ from pyspark.sql.types import *
 from pyspark.sql import functions as F
 from pyspark.logger import PySparkLogger
 
+import pyspark.pandas as pd
+import numpy as np
+
+from deepface.modules.representation import represent
+
 import logging
 
 logger = PySparkLogger.getLogger("CameraProcessor")
@@ -32,6 +37,28 @@ schema = StructType(
     ]
 )
 
+
+def search_embedding(batch_df: DataFrame, batch_id: int):
+    # Create embeddings
+    represent_kwargs = {
+        "enforce_detection": False,
+        "model_name": "SFace",
+        "detector_backend": "skip",
+        "max_faces": 1,
+    }
+
+    df = batch_df.toPandas()
+
+    df["embeddings"] = (
+        df["face_image"]
+        .map(np.stack)
+        .apply(represent, **represent_kwargs)
+        .map(lambda d: d[0]["embedding"])
+    )
+
+    print(df)
+
+
 if __name__ == "__main__":
     spark = SparkSession.builder.appName("CameraProcessor").getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
@@ -42,7 +69,7 @@ if __name__ == "__main__":
 
     data = (
         spark.readStream.schema(schema)
-        .options(maxFilesPerTrigger=100)
+        .options(maxFilesPerTrigger=50)
         .parquet(os.environ["DATA_PATH"])
     )
 
@@ -59,7 +86,12 @@ if __name__ == "__main__":
         ),
     ).drop("face", "facial_area")
 
-    query = faces.writeStream.outputMode("append").format("console").start()
+    query = (
+        faces.writeStream.outputMode("append")
+        .format("console")
+        .foreachBatch(search_embedding)
+        .start()
+    )
 
     logger.info("Streaming started, waiting for termination")
     query.awaitTermination()
