@@ -46,10 +46,16 @@ if __name__ == "__main__":
         .parquet(os.environ["DATA_PATH"])
     )
 
+    # Restore image pixel matrix
     faces = data.withColumn(
         "face_image",
         F.expr(
-            "transform(sequence(0, facial_area.w * facial_area.h), i -> slice(face, i*3 + 1, 3))"
+            """transform(sequence(0, facial_area.h - 1), i -> slice(
+                    transform(sequence(0, facial_area.w * facial_area.h - 1), j -> slice(face, j*3 + 1, 3)),
+                    i*facial_area.w + 1, facial_area.w
+                )
+            )
+            """
         ),
     ).drop("face", "facial_area")
 
