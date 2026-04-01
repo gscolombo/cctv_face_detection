@@ -2,3 +2,4 @@ deepface==0.0.99
 pandas
 pyarrow
 tf-keras
+pymongo

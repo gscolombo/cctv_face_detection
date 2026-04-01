@@ -47,6 +47,7 @@ services:
     build: ./processor
     environment:
       - DATA_PATH=${CAMERA_TEMP_DIR}
+      - DEEPFACE_MONGO_URI=${MONGODB_URL}
     depends_on:
       - camera
       - mongo

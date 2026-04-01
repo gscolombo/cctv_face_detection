@@ -7,6 +7,8 @@ import pyspark.pandas as pd
 import numpy as np
 
 from deepface.modules.representation import represent
+from deepface.modules.datastore import search
+
 
 import logging
 
@@ -38,30 +40,56 @@ schema = StructType(
 )
 
 
-def search_embedding(batch_df: DataFrame, batch_id: int):
+def _search(data: np.ndarray, **kwargs):
+    img, video, ts = data
+    result = search(np.stack(img), **kwargs)
+
+    cols = [
+        "_id",
+        "id",
+        "img_name",
+        "model_name",
+        "search_method",
+        "confidence",
+        "distance_metric",
+        "distance",
+    ]
+
+    if result:
+        result = result[0][cols]
+        result["video"] = video
+        result["ts"] = ts
+
+        return pd.DataFrame(result[result["confidence"] >= 75.0])
+
+
+def search_vector_db(batch_df: DataFrame, batch_id: int):
     # Create embeddings
-    represent_kwargs = {
+    search_kwargs = {
         "enforce_detection": False,
         "model_name": "SFace",
         "detector_backend": "skip",
-        "max_faces": 1,
+        "k": 3,
+        "database_type": "mongo",
     }
 
-    df = batch_df.toPandas()
+    df: pd.DataFrame = batch_df.toPandas()
 
-    df["embeddings"] = (
-        df["face_image"]
-        .map(np.stack)
-        .apply(represent, **represent_kwargs)
-        .map(lambda d: d[0]["embedding"])
+    search_results = (
+        df[["face_image", "video", "ts"]]
+        .apply(_search, axis=1, **search_kwargs)
+        .to_numpy()
     )
 
-    print(df)
+    full_search_results = pd.concat(search_results).reset_index(drop=True)
+
+    print(full_search_results)
 
 
 if __name__ == "__main__":
     spark = SparkSession.builder.appName("CameraProcessor").getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
+    spark.conf.set("spark.sql.ansi.enabled", False)
 
     while not os.path.exists(os.environ["DATA_PATH"]):
         logger.info("Waiting for data...")
@@ -69,7 +97,7 @@ if __name__ == "__main__":
 
     data = (
         spark.readStream.schema(schema)
-        .options(maxFilesPerTrigger=50)
+        .options(maxFilesPerTrigger=10)
         .parquet(os.environ["DATA_PATH"])
     )
 
@@ -89,7 +117,7 @@ if __name__ == "__main__":
     query = (
         faces.writeStream.outputMode("append")
         .format("console")
-        .foreachBatch(search_embedding)
+        .foreachBatch(search_vector_db)
         .start()
     )
 
