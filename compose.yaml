@@ -7,8 +7,12 @@ services:
     stdin_open: true
     environment:
       - CAMERA_TEMP_DIR=${CAMERA_TEMP_DIR}
+      - DISPLAY=${DISPLAY}
+      - XAUTHORITY=${XAUTH}
     volumes:
       - ./data:/data
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ${XAUTH}:${XAUTH}:rw
     privileged: true
     develop:
       watch:

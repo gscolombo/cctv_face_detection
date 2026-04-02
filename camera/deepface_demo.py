@@ -23,14 +23,14 @@ DETECTOR_MODEL = "yunet"
 
 
 def prepare_fs(name: str):
-    annotations_folder = Path(TEMP_DIR, name)
+    annotations_folder = Path(TEMP_DIR, f"video={name}")
     annotations_folder.mkdir(exist_ok=True, parents=True)
 
     return annotations_folder
 
 
-def face_recon(path: Path, show: bool = False, debug: bool = False):
-    annot_path = prepare_fs(os.path.basename(path).split(".")[0])
+def face_recon(path: str, show: bool = False, debug: bool = False):
+    annot_path = prepare_fs(Path(path).stem.split(".")[0])
 
     vidcap = cv.VideoCapture(path)
 
@@ -109,8 +109,8 @@ def face_recon(path: Path, show: bool = False, debug: bool = False):
                 if show:
                     cv.imshow("frame", image)
 
-                    if cv.waitKey(1) & 0xFF == ord("q"):
-                        break
+                if cv.waitKey(1) & 0xFF == ord("q"):
+                    break
 
                 detected_faces = []
         else:
