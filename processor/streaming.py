@@ -1,24 +1,27 @@
+from time import sleep
+import os
+
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.types import *
 from pyspark.sql import functions as F
 from pyspark.logger import PySparkLogger
 
+import pandas as core_pd
 import pyspark.pandas as pd
 import numpy as np
+import pyarrow as pa
 
-from deepface.modules.representation import represent
 from deepface.modules.datastore import search
 
 
+from datetime import datetime
 import logging
 
 logger = PySparkLogger.getLogger("CameraProcessor")
 logger.setLevel(logging.INFO)
 
-import os
-from time import sleep
 
-schema = StructType(
+input_schema = StructType(
     [
         StructField("face", ArrayType(DoubleType())),
         StructField(
@@ -39,10 +42,52 @@ schema = StructType(
     ]
 )
 
+result_schema = StructType([
+    StructField("_id", StringType()),
+    StructField("id", StringType()),          # convert ObjectId to string
+    StructField("img_name", StringType()),
+    StructField("model_name", StringType()),
+    StructField("search_method", StringType()),
+    StructField("confidence", DoubleType()),
+    StructField("distance_metric", StringType()),
+    StructField("distance", DoubleType()),
+    StructField("video", StringType()),
+    StructField("ts", TimestampType()),
+])
 
-def _search(data: np.ndarray, **kwargs):
-    img, video, ts = data
-    result = search(np.stack(img), **kwargs)
+
+def filter_by_max_confidence(batch_df: DataFrame, batch_id: int):
+    max_confidence_per_id = (
+        batch_df
+        .groupBy("id")
+        .agg(F.max("confidence")
+             .alias('value'))
+        .alias("max_confidence")
+        .withColumnsRenamed({
+            "id": "max_id"
+        })
+    )
+
+    (
+        batch_df
+        .join(max_confidence_per_id,
+              on=((F.col('search_results.id') == F.col('max_id')) &
+                  (F.col('search_results.confidence') == F.col('max_confidence.value'))),
+              how="inner")
+        .drop("max_id", "value")
+        .filter("confidence > 75")
+        .show()
+    )
+
+
+def search_vector_db(df_it):
+    search_kwargs = {
+        "enforce_detection": False,
+        "model_name": "SFace",
+        "detector_backend": "skip",
+        "k": 3,
+        "database_type": "mongo",
+    }
 
     cols = [
         "_id",
@@ -55,35 +100,28 @@ def _search(data: np.ndarray, **kwargs):
         "distance",
     ]
 
-    if result:
-        result = result[0][cols]
-        result["video"] = video
-        result["ts"] = ts
+    for df in df_it:
+        results = []
 
-        return pd.DataFrame(result[result["confidence"] >= 75.0])
+        for _, row in df.iterrows():
+            try:
+                img = np.reshape(row["face"], (row['h'], row['w'], 3))
 
+                search_result = search(img, **search_kwargs)
 
-def search_vector_db(batch_df: DataFrame, batch_id: int):
-    # Create embeddings
-    search_kwargs = {
-        "enforce_detection": False,
-        "model_name": "SFace",
-        "detector_backend": "skip",
-        "k": 3,
-        "database_type": "mongo",
-    }
+                if search_result:
+                    search_result = core_pd.concat(search_result)[cols].copy()
 
-    df: pd.DataFrame = batch_df.toPandas()
+                    search_result["video"] = row["video"]
+                    search_result["ts"] = row["ts"]
 
-    search_results = (
-        df[["face_image", "video", "ts"]]
-        .apply(_search, axis=1, **search_kwargs)
-        .to_numpy()
-    )
+                    for col in search_result:
+                        if col not in ["confidence", "distance", "ts"]:
+                            search_result[col] = search_result[col].astype(str)
 
-    full_search_results = pd.concat(search_results).reset_index(drop=True)
-
-    print(full_search_results)
+                    yield search_result
+            except Exception as e:
+                logger.error(e)
 
 
 if __name__ == "__main__":
@@ -96,28 +134,27 @@ if __name__ == "__main__":
         sleep(1)
 
     data = (
-        spark.readStream.schema(schema)
-        .options(maxFilesPerTrigger=10)
+        spark.readStream.schema(input_schema)
+        .options(maxFilesPerTrigger=100)
         .parquet(os.environ["DATA_PATH"])
     )
 
     # Restore image pixel matrix
-    faces = data.withColumn(
-        "face_image",
-        F.expr(
-            """transform(sequence(0, facial_area.h - 1), i -> slice(
-                    transform(sequence(0, facial_area.w * facial_area.h - 1), j -> slice(face, j*3 + 1, 3)),
-                    i*facial_area.w + 1, facial_area.w
-                )
-            )
-            """
-        ),
-    ).drop("face", "facial_area")
+    faces = data.withColumns({
+        "h": 'facial_area.h',
+        "w": 'facial_area.w'
+    }).drop("facial_area")
+
+    search_results = (
+        faces
+        .select("face", "h", "w", "video", "ts")
+        .mapInPandas(search_vector_db, result_schema)
+        .alias("search_results")
+    )
 
     query = (
-        faces.writeStream.outputMode("append")
-        .format("console")
-        .foreachBatch(search_vector_db)
+        search_results.writeStream.outputMode("append")
+        .foreachBatch(filter_by_max_confidence)
         .start()
     )
 
