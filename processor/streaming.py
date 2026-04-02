@@ -2,7 +2,6 @@ from time import sleep
 import os
 
 from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql.types import *
 from pyspark.sql import functions as F
 from pyspark.logger import PySparkLogger
 
@@ -20,41 +19,7 @@ import logging
 logger = PySparkLogger.getLogger("CameraProcessor")
 logger.setLevel(logging.INFO)
 
-
-input_schema = StructType(
-    [
-        StructField("face", ArrayType(DoubleType())),
-        StructField(
-            "facial_area",
-            StructType(
-                [
-                    StructField("x", LongType()),
-                    StructField("y", LongType()),
-                    StructField("w", LongType()),
-                    StructField("h", LongType()),
-                    StructField("left_eye", ArrayType(LongType())),
-                    StructField("right_eye", ArrayType(LongType())),
-                ]
-            ),
-        ),
-        StructField("confidence", DoubleType()),
-        StructField("ts", TimestampType()),
-    ]
-)
-
-result_schema = StructType([
-    StructField("_id", StringType()),
-    StructField("id", StringType()),          # convert ObjectId to string
-    StructField("img_name", StringType()),
-    StructField("model_name", StringType()),
-    StructField("search_method", StringType()),
-    StructField("confidence", DoubleType()),
-    StructField("distance_metric", StringType()),
-    StructField("distance", DoubleType()),
-    StructField("video", StringType()),
-    StructField("ts", TimestampType()),
-])
-
+from schemas import *
 
 def filter_by_max_confidence(batch_df: DataFrame, batch_id: int):
     max_confidence_per_id = (
