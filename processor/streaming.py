@@ -104,7 +104,6 @@ if __name__ == "__main__":
         .parquet(os.environ["DATA_PATH"])
     )
 
-    # Restore image pixel matrix
     faces = data.withColumns({
         "h": 'facial_area.h',
         "w": 'facial_area.w'
