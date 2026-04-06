@@ -1,3 +1,4 @@
+from schemas import *
 from time import sleep
 import os
 
@@ -19,7 +20,6 @@ import logging
 logger = PySparkLogger.getLogger("CameraProcessor")
 logger.setLevel(logging.INFO)
 
-from schemas import *
 
 def filter_by_max_confidence(batch_df: DataFrame, batch_id: int):
     max_confidence_per_id = (
@@ -92,8 +92,7 @@ def search_vector_db(df_it):
 if __name__ == "__main__":
     spark = SparkSession.builder.appName("CameraProcessor").getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
-    spark.conf.set("spark.sql.ansi.enabled", False)
-
+    
     while not os.path.exists(os.environ["DATA_PATH"]):
         logger.info("Waiting for data...")
         sleep(1)
