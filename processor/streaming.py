@@ -21,36 +21,12 @@ logger = PySparkLogger.getLogger("CameraProcessor")
 logger.setLevel(logging.INFO)
 
 
-def filter_by_max_confidence(batch_df: DataFrame, batch_id: int):
-    max_confidence_per_id = (
-        batch_df
-        .groupBy("id")
-        .agg(F.max("confidence")
-             .alias('value'))
-        .alias("max_confidence")
-        .withColumnsRenamed({
-            "id": "max_id"
-        })
-    )
-
-    (
-        batch_df
-        .join(max_confidence_per_id,
-              on=((F.col('search_results.id') == F.col('max_id')) &
-                  (F.col('search_results.confidence') == F.col('max_confidence.value'))),
-              how="inner")
-        .drop("max_id", "value")
-        .filter("confidence > 75")
-        .show()
-    )
-
-
 def search_vector_db(df_it):
     search_kwargs = {
         "enforce_detection": False,
         "model_name": "SFace",
         "detector_backend": "skip",
-        "k": 3,
+        "k": 1,
         "database_type": "mongo",
     }
 
@@ -92,7 +68,7 @@ def search_vector_db(df_it):
 if __name__ == "__main__":
     spark = SparkSession.builder.appName("CameraProcessor").getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
-    
+
     while not os.path.exists(os.environ["DATA_PATH"]):
         logger.info("Waiting for data...")
         sleep(1)
@@ -112,12 +88,14 @@ if __name__ == "__main__":
         faces
         .select("face", "h", "w", "video", "ts")
         .mapInPandas(search_vector_db, result_schema)
-        .alias("search_results")
+        .filter("confidence > 75")
     )
 
     query = (
-        search_results.writeStream.outputMode("append")
-        .foreachBatch(filter_by_max_confidence)
+        search_results
+        .writeStream
+        .outputMode("append")
+        .format("console")
         .start()
     )
 
